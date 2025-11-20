@@ -1,85 +1,105 @@
-// Synthesizer.cpp
 #include "Synthesizer.h"
+
+// Global pointer for the ISR
+Synthesizer* globalSynth = NULL;
+hw_timer_t * timer = NULL;
+
+// ISR function - must be in IRAM
+void IRAM_ATTR onTimer() {
+  if (globalSynth) {
+    globalSynth->update();
+  }
+}
 
 Synthesizer::Synthesizer(int dacPin) {
   this->dacPin = dacPin;
-  this->synthType = 0;  // Por defecto, seleccionamos la onda seno
+  this->synthType = 0;
+  this->frequency = 440.0;
+  this->volume = 0;
+  this->phase = 0.0;
+  this->phaseIncrement = 0.0;
 }
 
 void Synthesizer::init() {
-  // No se requiere inicialización adicional para el DAC en la ESP32
+  globalSynth = this;
+
+  // Configure Timer 0
+  // Prescaler 80 -> 80MHz / 80 = 1MHz (1 tick = 1us)
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+
+  // Alarm every (1000000 / sampleRate) microseconds
+  // For 22050Hz, that's approx 45us
+  int alarmValue = 1000000 / sampleRate;
+  timerAlarmWrite(timer, alarmValue, true);
+  timerAlarmEnable(timer);
 }
 
 void Synthesizer::setSynthType(int type) {
   this->synthType = type;
 }
 
-void Synthesizer::generateSound(float frequency, uint8_t volume) {
-  // Según el tipo de onda seleccionada, generamos el sonido adecuado
+void Synthesizer::setFrequency(float frequency) {
+  this->frequency = frequency;
+  this->phaseIncrement = frequency / (float)sampleRate;
+}
+
+void Synthesizer::setVolume(int volume) {
+  // Clamp volume between 0 and 255
+  if (volume < 0) volume = 0;
+  if (volume > 255) volume = 255;
+  this->volume = volume;
+}
+
+void Synthesizer::update() {
+  // Increment phase
+  phase += phaseIncrement;
+  if (phase >= 1.0) phase -= 1.0;
+
+  uint8_t sample = 0;
+
+  // Only generate sound if volume is > 0 to save CPU/Power if needed
+  // though strictly for a synth we just keep running.
+
   switch (synthType) {
-    case 0:
-      generateSineWave(frequency, volume);
-      break;
-    case 1:
-      generateSquareWave(frequency, volume);
-      break;
-    case 2:
-      generateSawtoothWave(frequency, volume);
-      break;
-    case 3:
-      generateTriangleWave(frequency, volume);
-      break;
+    case 0: sample = getSineSample(); break;
+    case 1: sample = getSquareSample(); break;
+    case 2: sample = getSawtoothSample(); break;
+    case 3: sample = getTriangleSample(); break;
+    default: sample = getSineSample(); break;
   }
+
+  // Apply volume
+  // sample is 0-255. Volume is 0-255.
+  // Output = (sample * volume) / 255
+  // To be safe with types:
+  uint16_t output = ((uint16_t)sample * (uint16_t)volume) >> 8;
+
+  dacWrite(dacPin, output);
 }
 
-void Synthesizer::generateSineWave(float frequency, uint8_t volume) {
-  // Generación de onda seno usando una tabla de valores de seno
-  const int sineWaveSamples = 100;  // Cantidad de muestras para una onda seno completa
-  float angleStep = (2.0 * PI) / sineWaveSamples;  // Paso de ángulo para cada muestra
-  for (int i = 0; i < sineWaveSamples; i++) {
-    float sample = sin(i * angleStep);  // Generamos la muestra seno
-    int output = (int)((sample + 1.0) * (volume / 2.0));  // Normalizamos y ajustamos al volumen
-    dacWrite(dacPin, output);
-    delayMicroseconds(1000000 / (sineWaveSamples * frequency));  // Ajuste de tiempo entre muestras
-  }
+uint8_t Synthesizer::getSineSample() {
+  // Approximate sine with standard library for simplicity
+  // Optimization: Precompute table if needed, but sin() is fast enough on ESP32 for 22kHz
+  // range -1 to 1 -> map to 0-255
+  float rads = phase * 2.0 * PI;
+  float val = sin(rads);
+  return (uint8_t)((val + 1.0) * 127.5);
 }
 
-void Synthesizer::generateSquareWave(float frequency, uint8_t volume) {
-  // Generación de onda cuadrada alternando entre dos niveles
-  int highOutput = volume;
-  int lowOutput = 0;
-  int period = 1000000 / frequency;  // Periodo de la onda en microsegundos
-  dacWrite(dacPin, highOutput);
-  delayMicroseconds(period / 2);  // Duración de la fase alta
-  dacWrite(dacPin, lowOutput);
-  delayMicroseconds(period / 2);  // Duración de la fase baja
+uint8_t Synthesizer::getSquareSample() {
+  if (phase < 0.5) return 255;
+  else return 0;
 }
 
-void Synthesizer::generateSawtoothWave(float frequency, uint8_t volume) {
-  // Generación de onda diente de sierra incrementando el valor linealmente
-  int samples = 100;  // Cantidad de muestras por ciclo
-  int period = 1000000 / frequency;
-  int step = volume / samples;
-  for (int i = 0; i < samples; i++) {
-    dacWrite(dacPin, i * step);  // Generamos la rampa ascendente
-    delayMicroseconds(period / samples);
-  }
+uint8_t Synthesizer::getSawtoothSample() {
+  return (uint8_t)(phase * 255.0);
 }
 
-void Synthesizer::generateTriangleWave(float frequency, uint8_t volume) {
-  // Generación de onda triangular alternando subida y bajada linealmente
-  int samples = 50;  // Muestras para cada medio ciclo
-  int period = 1000000 / frequency;
-  int step = volume / samples;
-
-  // Subida
-  for (int i = 0; i < samples; i++) {
-    dacWrite(dacPin, i * step);
-    delayMicroseconds(period / (2 * samples));
-  }
-  // Bajada
-  for (int i = samples; i > 0; i--) {
-    dacWrite(dacPin, i * step);
-    delayMicroseconds(period / (2 * samples));
+uint8_t Synthesizer::getTriangleSample() {
+  if (phase < 0.5) {
+    return (uint8_t)(phase * 2.0 * 255.0);
+  } else {
+    return (uint8_t)((1.0 - phase) * 2.0 * 255.0);
   }
 }

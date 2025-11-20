@@ -21,8 +21,13 @@ float UltrasonicSensor::readDistance() {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  // Lee el tiempo que tarda el pulso en regresar
-  long duration = pulseIn(echoPin, HIGH);
+  // Lee el tiempo que tarda el pulso en regresar con timeout de 30ms
+  // 30ms es suficiente para medir hasta ~5 metros
+  long duration = pulseIn(echoPin, HIGH, 30000);
+
+  if (duration == 0) {
+    return -1.0; // Indica fuera de rango o error
+  }
 
   // Calcula la distancia en centímetros
   float distance = (duration * 0.034) / 2;

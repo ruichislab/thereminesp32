@@ -1,27 +1,32 @@
-// Synthesizer.h
 #ifndef SYNTHESIZER_H
 #define SYNTHESIZER_H
 
 #include <Arduino.h>
+#include <math.h>
 
 class Synthesizer {
-  public:
+public:
     Synthesizer(int dacPin);
     void init();
-    void generateSound(float frequency, uint8_t volume);
-
-    // Selecciona el tipo de onda
     void setSynthType(int type);
+    void setFrequency(float frequency);
+    void setVolume(int volume);
+    void update(); // Called by ISR
 
-  private:
+private:
     int dacPin;
-    int synthType;
+    volatile int synthType;
+    volatile float frequency;
+    volatile int volume;
+    volatile float phase;
+    float phaseIncrement;
+    const int sampleRate = 22050; // Hz
 
-    // Métodos internos para generar cada tipo de onda
-    void generateSineWave(float frequency, uint8_t volume);
-    void generateSquareWave(float frequency, uint8_t volume);
-    void generateSawtoothWave(float frequency, uint8_t volume);
-    void generateTriangleWave(float frequency, uint8_t volume);
+    // Waveform generation helpers
+    uint8_t getSineSample();
+    uint8_t getSquareSample();
+    uint8_t getSawtoothSample();
+    uint8_t getTriangleSample();
 };
 
 #endif
