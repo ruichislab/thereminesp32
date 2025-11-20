@@ -1,106 +1,35 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Proyecto Theremin con ESP32</title>
-</head>
-<body>
-  <h1>PROYECTO THEREMIN CON ESP32</h1>
+# Proyecto Theremin con ESP32 (Versión Profesional)
 
-  <h2>¡CREA TU PROPIO THEREMIN EN CASA!</h2>
+¡Bienvenido! Este repositorio contiene el código fuente y la documentación para construir un **Theremin basado en ESP32** de alta calidad.
 
-  <p>¿Alguna vez soñaste con tocar un instrumento musical sin siquiera tocarlo? ¡Pues ahora puedes! Con este proyecto, podrás construir tu propio theremin utilizando un ESP32. Este instrumento único no solo te permitirá crear música sin contacto físico, sino que también te sumergirá en el fascinante mundo de la electrónica y la programación.</p>
+A diferencia de los proyectos básicos de hobby, esta versión utiliza características avanzadas del ESP32 para comportarse como un verdadero instrumento musical.
 
-  <h3>REQUISITOS</h3>
+## 🚀 Características Principales
 
-  <ul>
-    <li><strong>Hardware:</strong>
-      <ul>
-        <li>ESP32</li>
-        <li>Sensor de distancia (ej. HC-SR04)</li>
-        <li>Altavoz</li>
-        <li>Resistores y condensadores</li>
-        <li>Protoboard y cables</li>
-      </ul>
-    </li>
-    <li><strong>Software:</strong>
-      <ul>
-        <li>IDE de Arduino</li>
-        <li>Biblioteca ESP32 para Arduino</li>
-        <li>Biblioteca I2S para manejo de audio</li>
-        <li>Biblioteca SSD1306 para la pantalla OLED</li>
-      </ul>
-    </li>
-  </ul>
+*   **Audio Continuo sin Interrupciones:** Utiliza síntesis por tabla de ondas (Wavetable Synthesis) e interrupciones de hardware (Timer ISR) para un sonido suave y fluido.
+*   **Multitarea Real (FreeRTOS):** La lectura de sensores se realiza en un núcleo separado para evitar retrasos (lag) en el audio o la interfaz.
+*   **Modo Musical (Autotune):** Incluye un modo cuantizado que "afina" las notas automáticamente para facilitar la ejecución de melodías.
+*   **Calibración Persistente:** Un sistema de calibración guarda los rangos de tus sensores en la memoria flash, adaptándose a cualquier entorno.
+*   **Interfaz Visual:** Pantalla OLED que muestra la nota musical actual, frecuencia, barra de volumen y tipo de onda.
 
-  <h3>INSTRUCCIONES</h3>
+## 📚 Documentación
 
-  <h4>1. CONFIGURACIÓN DEL ENTORNO</h4>
+Para instrucciones detalladas de construcción, cableado y uso, consulta el manual completo:
 
-  <ol>
-    <li>Descarga e instala el <a href="https://www.arduino.cc/en/software">IDE de Arduino</a>.</li>
-    <li>Añade la <strong>biblioteca ESP32</strong> a tu IDE de Arduino siguiendo <a href="https://randomnerdtutorials.com/installing-the-esp32-board-in-arduino-ide-windows-instructions/">estas instrucciones</a>.</li>
-  </ol>
+👉 **[LEER EL MANUAL DE USUARIO (MANUAL_DE_USUARIO.md)](./MANUAL_DE_USUARIO.md)**
 
-  <h4>2. CONFIGURACIÓN DE HARDWARE</h4>
+## 🛠️ Estructura del Proyecto
 
-  <p>Conecta los componentes según las siguientes especificaciones:</p>
+*   `codigo/`: Contiene el sketch de Arduino (`.ino`) y las clases C++ (`.cpp`, `.h`).
+*   `MANUAL_DE_USUARIO.md`: Guía paso a paso, lista de materiales y diagrama de conexión.
 
-  <ul>
-    <li><strong>Sensor de Distancia (Tono):</strong>
-      <ul>
-        <li>Trig a GPIO 12</li>
-        <li>Echo a GPIO 13</li>
-      </ul>
-    </li>
-    <li><strong>Sensor de Distancia (Volumen):</strong>
-      <ul>
-        <li>Trig a GPIO 14</li>
-        <li>Echo a GPIO 27</li>
-      </ul>
-    </li>
-    <li><strong>Potenciómetros:</strong>
-      <ul>
-        <li>POT_1_PIN (seleccionar sintetizador) a GPIO 34</li>
-        <li>POT_2_PIN (ajustar volumen) a GPIO 35</li>
-      </ul>
-    </li>
-    <li><strong>Pantalla OLED:</strong>
-      <ul>
-        <li>Conecta la pantalla OLED usando el protocolo I2C:</li>
-        <li>SDA a GPIO 21</li>
-        <li>SCL a GPIO 22</li>
-      </ul>
-    </li>
-    <li><strong>Altavoz:</strong>
-      <ul>
-        <li>DAC_PIN a GPIO 25</li>
-      </ul>
-    </li>
-    <li><strong>Botón:</strong>
-      <ul>
-        <li>BUTTON_PIN a GPIO 32</li>
-      </ul>
-    </li>
-  </ul>
+## ⚡ Inicio Rápido
 
-  <h4>3. PROGRAMACIÓN</h4>
+1.  Clona este repositorio.
+2.  Abre `codigo/Theremin_ESP32.ino` en Arduino IDE.
+3.  Instala las librerías `Adafruit SSD1306` y `Adafruit GFX`.
+4.  Sube el código a tu ESP32.
+5.  ¡Sigue las instrucciones de calibración en el Manual!
 
-  <ol>
-    <li>Abre el archivo <code>Theremin_ESP32.ino</code> en el IDE de Arduino.</li>
-    <li>Modifica los pines y funciones para adaptarlos al ESP32.</li>
-    <li>Sube el código al ESP32.</li>
-  </ol>
-
-  <h4>4. PRUEBAS Y AJUSTES</h4>
-
-  <ol>
-    <li>Ajusta el código según sea necesario para asegurar la funcionalidad del theremin.</li>
-    <li>Prueba el theremin y realiza ajustes de calibración.</li>
-  </ol>
-
-  <h3>5. ¡DISFRUTA!</h3>
-
-  <p>¡Ahora puedes disfrutar tocando tu theremin hecho en casa! Experimenta con los sonidos, ajusta los parámetros y ¡sorprende a tus amigos con este increíble proyecto DIY!</p>
-</body>
-</html>
-
+---
+*Proyecto mejorado con arquitectura profesional de sistemas embebidos.*
