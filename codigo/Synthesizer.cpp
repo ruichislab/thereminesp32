@@ -1,85 +1,129 @@
-// Synthesizer.cpp
 #include "Synthesizer.h"
+
+// Global pointer for the ISR
+Synthesizer* globalSynth = NULL;
+hw_timer_t * timer = NULL;
+
+// ISR function - must be in IRAM
+void IRAM_ATTR onTimer() {
+  if (globalSynth) {
+    globalSynth->update();
+  }
+}
 
 Synthesizer::Synthesizer(int dacPin) {
   this->dacPin = dacPin;
-  this->synthType = 0;  // Por defecto, seleccionamos la onda seno
+  this->synthType = 0;
+  this->frequency = 440.0;
+  this->currentFreq = 440.0;
+  this->volume = 0;
+  this->phaseIndex = 0.0;
+  this->phaseIncrement = 0.0;
+  this->quantizationEnabled = false;
 }
 
 void Synthesizer::init() {
-  // No se requiere inicialización adicional para el DAC en la ESP32
+  globalSynth = this;
+
+  // Initialize Waveforms
+  Waveforms::init();
+
+  // Configure Timer 0
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+
+  // Alarm at sample rate
+  int alarmValue = 1000000 / sampleRate;
+  timerAlarmWrite(timer, alarmValue, true);
+  timerAlarmEnable(timer);
 }
 
 void Synthesizer::setSynthType(int type) {
   this->synthType = type;
 }
 
-void Synthesizer::generateSound(float frequency, uint8_t volume) {
-  // Según el tipo de onda seleccionada, generamos el sonido adecuado
+void Synthesizer::setFrequency(float freq) {
+  this->frequency = freq;
+  // If not quantizing, update immediately (with simple smoothing done externally or here)
+  // We'll do logic in updatePhaseIncrement or main loop?
+  // For now, let's just set it. The ISR uses phaseIncrement.
+
+  float target = freq;
+
+  // If quantization is enabled, snap to nearest note
+  // Note: calculating this in ISR is bad. Calculating here is okay.
+  if (quantizationEnabled) {
+     target = getClosestNoteFreq(freq, NULL);
+  }
+
+  // Simple Glide / Portamento
+  // Move currentFreq towards target
+  // In a real synth, this might be time-based.
+  // Here we just snap for responsiveness or apply slight filter.
+  this->currentFreq = target;
+
+  updatePhaseIncrement();
+}
+
+void Synthesizer::setVolume(int vol) {
+  if (vol < 0) vol = 0;
+  if (vol > 255) vol = 255;
+  this->volume = vol;
+}
+
+void Synthesizer::setQuantization(bool enabled) {
+    this->quantizationEnabled = enabled;
+}
+
+void Synthesizer::updatePhaseIncrement() {
+    // phaseIncrement = (Frequency * TableSize) / SampleRate
+    this->phaseIncrement = (currentFreq * (float)WAVETABLE_SIZE) / (float)sampleRate;
+}
+
+void IRAM_ATTR Synthesizer::update() {
+  // Increment phase
+  phaseIndex += phaseIncrement;
+  if (phaseIndex >= WAVETABLE_SIZE) phaseIndex -= WAVETABLE_SIZE;
+
+  // Get integer index
+  int idx = (int)phaseIndex;
+  if (idx >= WAVETABLE_SIZE) idx = 0; // Safety
+
+  uint8_t sample = 128;
+
   switch (synthType) {
-    case 0:
-      generateSineWave(frequency, volume);
-      break;
-    case 1:
-      generateSquareWave(frequency, volume);
-      break;
-    case 2:
-      generateSawtoothWave(frequency, volume);
-      break;
-    case 3:
-      generateTriangleWave(frequency, volume);
-      break;
+    case 0: sample = Waveforms::sine[idx]; break;
+    case 1: sample = Waveforms::square[idx]; break;
+    case 2: sample = Waveforms::saw[idx]; break;
+    case 3: sample = Waveforms::triangle[idx]; break;
+    default: sample = Waveforms::sine[idx]; break;
   }
+
+  // Apply volume
+  // Fast integer math: (Sample * Volume) >> 8
+  uint16_t output = ((uint16_t)sample * (uint16_t)volume) >> 8;
+
+  dacWrite(dacPin, output);
 }
 
-void Synthesizer::generateSineWave(float frequency, uint8_t volume) {
-  // Generación de onda seno usando una tabla de valores de seno
-  const int sineWaveSamples = 100;  // Cantidad de muestras para una onda seno completa
-  float angleStep = (2.0 * PI) / sineWaveSamples;  // Paso de ángulo para cada muestra
-  for (int i = 0; i < sineWaveSamples; i++) {
-    float sample = sin(i * angleStep);  // Generamos la muestra seno
-    int output = (int)((sample + 1.0) * (volume / 2.0));  // Normalizamos y ajustamos al volumen
-    dacWrite(dacPin, output);
-    delayMicroseconds(1000000 / (sineWaveSamples * frequency));  // Ajuste de tiempo entre muestras
-  }
-}
+// Musical helper
+// Returns closest frequency in Hz to standard 12-tone equal temperament
+float Synthesizer::getClosestNoteFreq(float freq, char* noteNameBuffer) {
+    if (freq < 1.0) return freq; // Avoid log(0)
 
-void Synthesizer::generateSquareWave(float frequency, uint8_t volume) {
-  // Generación de onda cuadrada alternando entre dos niveles
-  int highOutput = volume;
-  int lowOutput = 0;
-  int period = 1000000 / frequency;  // Periodo de la onda en microsegundos
-  dacWrite(dacPin, highOutput);
-  delayMicroseconds(period / 2);  // Duración de la fase alta
-  dacWrite(dacPin, lowOutput);
-  delayMicroseconds(period / 2);  // Duración de la fase baja
-}
+    // MIDI Note calculation: 69 + 12 * log2(freq / 440)
+    float noteNumFloat = 69.0 + 12.0 * log2(freq / 440.0);
+    int noteNum = (int)(noteNumFloat + 0.5); // Round to nearest integer
 
-void Synthesizer::generateSawtoothWave(float frequency, uint8_t volume) {
-  // Generación de onda diente de sierra incrementando el valor linealmente
-  int samples = 100;  // Cantidad de muestras por ciclo
-  int period = 1000000 / frequency;
-  int step = volume / samples;
-  for (int i = 0; i < samples; i++) {
-    dacWrite(dacPin, i * step);  // Generamos la rampa ascendente
-    delayMicroseconds(period / samples);
-  }
-}
+    // Convert back to freq: 440 * 2^((note - 69)/12)
+    float snappedFreq = 440.0 * pow(2.0, (float)(noteNum - 69) / 12.0);
 
-void Synthesizer::generateTriangleWave(float frequency, uint8_t volume) {
-  // Generación de onda triangular alternando subida y bajada linealmente
-  int samples = 50;  // Muestras para cada medio ciclo
-  int period = 1000000 / frequency;
-  int step = volume / samples;
+    if (noteNameBuffer != NULL) {
+        const char* noteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        int octave = (noteNum / 12) - 1;
+        int noteIndex = noteNum % 12;
+        sprintf(noteNameBuffer, "%s%d", noteNames[noteIndex], octave);
+    }
 
-  // Subida
-  for (int i = 0; i < samples; i++) {
-    dacWrite(dacPin, i * step);
-    delayMicroseconds(period / (2 * samples));
-  }
-  // Bajada
-  for (int i = samples; i > 0; i--) {
-    dacWrite(dacPin, i * step);
-    delayMicroseconds(period / (2 * samples));
-  }
+    return snappedFreq;
 }
