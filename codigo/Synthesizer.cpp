@@ -15,21 +15,24 @@ Synthesizer::Synthesizer(int dacPin) {
   this->dacPin = dacPin;
   this->synthType = 0;
   this->frequency = 440.0;
+  this->currentFreq = 440.0;
   this->volume = 0;
-  this->phase = 0.0;
+  this->phaseIndex = 0.0;
   this->phaseIncrement = 0.0;
+  this->quantizationEnabled = false;
 }
 
 void Synthesizer::init() {
   globalSynth = this;
 
+  // Initialize Waveforms
+  Waveforms::init();
+
   // Configure Timer 0
-  // Prescaler 80 -> 80MHz / 80 = 1MHz (1 tick = 1us)
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, &onTimer, true);
 
-  // Alarm every (1000000 / sampleRate) microseconds
-  // For 22050Hz, that's approx 45us
+  // Alarm at sample rate
   int alarmValue = 1000000 / sampleRate;
   timerAlarmWrite(timer, alarmValue, true);
   timerAlarmEnable(timer);
@@ -39,67 +42,88 @@ void Synthesizer::setSynthType(int type) {
   this->synthType = type;
 }
 
-void Synthesizer::setFrequency(float frequency) {
-  this->frequency = frequency;
-  this->phaseIncrement = frequency / (float)sampleRate;
+void Synthesizer::setFrequency(float freq) {
+  this->frequency = freq;
+  // If not quantizing, update immediately (with simple smoothing done externally or here)
+  // We'll do logic in updatePhaseIncrement or main loop?
+  // For now, let's just set it. The ISR uses phaseIncrement.
+
+  float target = freq;
+
+  // If quantization is enabled, snap to nearest note
+  // Note: calculating this in ISR is bad. Calculating here is okay.
+  if (quantizationEnabled) {
+     target = getClosestNoteFreq(freq, NULL);
+  }
+
+  // Simple Glide / Portamento
+  // Move currentFreq towards target
+  // In a real synth, this might be time-based.
+  // Here we just snap for responsiveness or apply slight filter.
+  this->currentFreq = target;
+
+  updatePhaseIncrement();
 }
 
-void Synthesizer::setVolume(int volume) {
-  // Clamp volume between 0 and 255
-  if (volume < 0) volume = 0;
-  if (volume > 255) volume = 255;
-  this->volume = volume;
+void Synthesizer::setVolume(int vol) {
+  if (vol < 0) vol = 0;
+  if (vol > 255) vol = 255;
+  this->volume = vol;
 }
 
-void Synthesizer::update() {
+void Synthesizer::setQuantization(bool enabled) {
+    this->quantizationEnabled = enabled;
+}
+
+void Synthesizer::updatePhaseIncrement() {
+    // phaseIncrement = (Frequency * TableSize) / SampleRate
+    this->phaseIncrement = (currentFreq * (float)WAVETABLE_SIZE) / (float)sampleRate;
+}
+
+void IRAM_ATTR Synthesizer::update() {
   // Increment phase
-  phase += phaseIncrement;
-  if (phase >= 1.0) phase -= 1.0;
+  phaseIndex += phaseIncrement;
+  if (phaseIndex >= WAVETABLE_SIZE) phaseIndex -= WAVETABLE_SIZE;
 
-  uint8_t sample = 0;
+  // Get integer index
+  int idx = (int)phaseIndex;
+  if (idx >= WAVETABLE_SIZE) idx = 0; // Safety
 
-  // Only generate sound if volume is > 0 to save CPU/Power if needed
-  // though strictly for a synth we just keep running.
+  uint8_t sample = 128;
 
   switch (synthType) {
-    case 0: sample = getSineSample(); break;
-    case 1: sample = getSquareSample(); break;
-    case 2: sample = getSawtoothSample(); break;
-    case 3: sample = getTriangleSample(); break;
-    default: sample = getSineSample(); break;
+    case 0: sample = Waveforms::sine[idx]; break;
+    case 1: sample = Waveforms::square[idx]; break;
+    case 2: sample = Waveforms::saw[idx]; break;
+    case 3: sample = Waveforms::triangle[idx]; break;
+    default: sample = Waveforms::sine[idx]; break;
   }
 
   // Apply volume
-  // sample is 0-255. Volume is 0-255.
-  // Output = (sample * volume) / 255
-  // To be safe with types:
+  // Fast integer math: (Sample * Volume) >> 8
   uint16_t output = ((uint16_t)sample * (uint16_t)volume) >> 8;
 
   dacWrite(dacPin, output);
 }
 
-uint8_t Synthesizer::getSineSample() {
-  // Approximate sine with standard library for simplicity
-  // Optimization: Precompute table if needed, but sin() is fast enough on ESP32 for 22kHz
-  // range -1 to 1 -> map to 0-255
-  float rads = phase * 2.0 * PI;
-  float val = sin(rads);
-  return (uint8_t)((val + 1.0) * 127.5);
-}
+// Musical helper
+// Returns closest frequency in Hz to standard 12-tone equal temperament
+float Synthesizer::getClosestNoteFreq(float freq, char* noteNameBuffer) {
+    if (freq < 1.0) return freq; // Avoid log(0)
 
-uint8_t Synthesizer::getSquareSample() {
-  if (phase < 0.5) return 255;
-  else return 0;
-}
+    // MIDI Note calculation: 69 + 12 * log2(freq / 440)
+    float noteNumFloat = 69.0 + 12.0 * log2(freq / 440.0);
+    int noteNum = (int)(noteNumFloat + 0.5); // Round to nearest integer
 
-uint8_t Synthesizer::getSawtoothSample() {
-  return (uint8_t)(phase * 255.0);
-}
+    // Convert back to freq: 440 * 2^((note - 69)/12)
+    float snappedFreq = 440.0 * pow(2.0, (float)(noteNum - 69) / 12.0);
 
-uint8_t Synthesizer::getTriangleSample() {
-  if (phase < 0.5) {
-    return (uint8_t)(phase * 2.0 * 255.0);
-  } else {
-    return (uint8_t)((1.0 - phase) * 2.0 * 255.0);
-  }
+    if (noteNameBuffer != NULL) {
+        const char* noteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        int octave = (noteNum / 12) - 1;
+        int noteIndex = noteNum % 12;
+        sprintf(noteNameBuffer, "%s%d", noteNames[noteIndex], octave);
+    }
+
+    return snappedFreq;
 }
